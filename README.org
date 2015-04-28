@@ -22,6 +22,12 @@ Goldrush is a small Erlang app that provides fast event stream processing
    with an erlang function. The function will be applied to each
    output event from the query.
 
+* Handle job execution and timing
+- create input events that include runtime on successful function executions.
+
+* Handle fastest lookups of stored values.
+- provide state storage option to compile, caching the values in query module.
+
 * Usage 
   To use goldrush in your application, you need to define it as a rebar dep or
   include it in erlang's path.
@@ -147,6 +153,32 @@ Write all input events where `error_level' exists and is less than 5 as info rep
 #+END_EXAMPLE
 
 
+
+# Composing Modules with stored state #
+
+To compose a module with state data you will add a third argument (orddict).
+#+BEGIN_EXAMPLE
+    glc:compile(Module, Query, [{stored, value}]).
+#+END_EXAMPLE
+
+# Accessing stored state data #
+
+Return the stored value in this query module.
+#+BEGIN_EXAMPLE
+{ok, value} = glc:get(stored).
+#+END_EXAMPLE
+
+
+# Executing jobs #
+
+To execute a job through the query module, inputting an event on success.
+#+BEGIN_EXAMPLE
+    Event = gre:make([{'a', 2}], [list]).
+    Result = glc:run(Module, fun(Event, State) ->
+        %% do not end with {error, _} or throw an exception 
+    end, Event).
+#+END_EXAMPLE
+
 # Event Processing Statistics #
 
 Return the number of input events for this query module.
@@ -165,6 +197,43 @@ glc:filter(Module).
 #+END_EXAMPLE
 
 
+# Job Processing Statistics #
+
+Return the number of job runs for this query module.
+#+BEGIN_EXAMPLE
+glc:job_run(Module).
+#+END_EXAMPLE
+
+Return the number of job errors for this query module.
+#+BEGIN_EXAMPLE
+glc:job_error(Module).
+#+END_EXAMPLE
+
+Return the number of job inputs for this query module.
+#+BEGIN_EXAMPLE
+glc:job_input(Module).
+#+END_EXAMPLE
+
+Return the amount of time jobs took for this query module.
+#+BEGIN_EXAMPLE
+glc:job_time(Module).
+#+END_EXAMPLE
+
+
+# Tips & Tricks #
+
+Return the average time jobs took for this query module.
+#+BEGIN_EXAMPLE
+glc:job_time(Module) / glc:job_input(Module) / 1000000.
+#+END_EXAMPLE
+
+
+Return the query combining the conditional logic of multiple modules 
+#+BEGIN_EXAMPLE
+glc_lib:reduce(glc:all([Module1:info('query'), Module2:info('query')]).
+#+END_EXAMPLE
+
+
 * Build
 
 #+BEGIN_EXAMPLE
@@ -178,6 +247,10 @@ or
 #+END_EXAMPLE
 
 * CHANGELOG 
+
+0.1.7
+- Add job execution and timings
+- Add state storage option 
 
 0.1.6 
 - Add notfound event matching

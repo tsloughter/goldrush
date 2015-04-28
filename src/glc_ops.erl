@@ -105,7 +105,8 @@ null(Result) ->
 %% to use a finalized query to construct a new query will result
 %% in a `badarg' error.
 -spec with(op(), fun((gre:event()) -> term())) -> op().
-with(Query, Fun) when is_function(Fun, 1) ->
+with(Query, Fun) when is_function(Fun, 1);
+                      is_function(Fun, 2) ->
     {with, Query, Fun};
 with(Query, Fun) ->
     erlang:error(badarg, [Query, Fun]).
