@@ -157,7 +157,7 @@ Write all input events where `error_level' exists and is less than 5 as info rep
 
 
 
-* Composing Modules with stored state 
+* Composing Modules with stored data
   - You can create query modules with local state to compare to event data in `with' and `run'
 
 To compose a module with state data you will add a third argument (orddict).
@@ -165,7 +165,7 @@ To compose a module with state data you will add a third argument (orddict).
     glc:compile(Module, Query, [{stored, value}]).
 #+END_EXAMPLE
 
-* Accessing stored state data in constant time 
+* Accessing stored data in constant time 
  - You can use query modules in a way similar to mochiglobal 
 
 Return the stored value in this query module.
@@ -174,7 +174,7 @@ Return the stored value in this query module.
 #+END_EXAMPLE
 
 
-* Job processing through composed modules 
+* Job processing with composed modules 
   - You can use query modules to execute jobs, if the job doesn't error, process an event.
   - `with' is similar to `run', the main difference is additional statistics and execution order
 
