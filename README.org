@@ -117,11 +117,14 @@ The previous example will produce and is equivalent to:
 
 
 
-# Composing Modules #
+* Composing Modules 
+  - All query modules must be compiled before use
 
 To compose a module you will take your Query defined above and compile it. 
 #+BEGIN_EXAMPLE
     glc:compile(Module, Query).
+    glc:compile(Module, Query, State).
+    glc:compile(Module, Query, State, ResetStatistics).
 #+END_EXAMPLE
 
 
@@ -154,14 +157,16 @@ Write all input events where `error_level' exists and is less than 5 as info rep
 
 
 
-# Composing Modules with stored state #
+* Composing Modules with stored state 
+  - You can create query modules with local state to compare to event data in `with' and `run'
 
 To compose a module with state data you will add a third argument (orddict).
 #+BEGIN_EXAMPLE
     glc:compile(Module, Query, [{stored, value}]).
 #+END_EXAMPLE
 
-# Accessing stored state data #
+* Accessing stored state data in constant time 
+ - You can use query modules in a way similar to mochiglobal 
 
 Return the stored value in this query module.
 #+BEGIN_EXAMPLE
@@ -169,7 +174,9 @@ Return the stored value in this query module.
 #+END_EXAMPLE
 
 
-# Executing jobs #
+* Job processing through composed modules 
+  - You can use query modules to execute jobs, if the job doesn't error, process an event.
+  - `with' is similar to `run', the main difference is additional statistics and execution order
 
 To execute a job through the query module, inputting an event on success.
 #+BEGIN_EXAMPLE
@@ -179,7 +186,7 @@ To execute a job through the query module, inputting an event on success.
     end, Event).
 #+END_EXAMPLE
 
-# Event Processing Statistics #
+* Event Processing Statistics 
 
 Return the number of input events for this query module.
 #+BEGIN_EXAMPLE
@@ -197,7 +204,7 @@ glc:filter(Module).
 #+END_EXAMPLE
 
 
-# Job Processing Statistics #
+* Job Processing Statistics 
 
 Return the number of job runs for this query module.
 #+BEGIN_EXAMPLE
@@ -220,7 +227,8 @@ glc:job_time(Module).
 #+END_EXAMPLE
 
 
-# Tips & Tricks #
+* Some Tips & Tricks 
+  - This is really just a drop in the bucket.
 
 Return the average time jobs took for this query module.
 #+BEGIN_EXAMPLE
