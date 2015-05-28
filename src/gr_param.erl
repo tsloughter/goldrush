@@ -18,7 +18,7 @@
 
 %% API
 -export([start_link/1, 
-         list/1, insert/2, 
+         list/1, insert/2,
          lookup/2, lookup_element/2,
          info/1, info_size/1, transform/1]).
 
@@ -30,6 +30,7 @@
          terminate/2,
          code_change/3]).
 
+-include_lib("stdlib/include/qlc.hrl").
 -record(state, {table_id, waiting=[]}).
 
 %%%===================================================================
@@ -127,9 +128,9 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(Call, From, State) when is_atom(Call), Call =:= list; 
-                                     Call =:= info; Call =:= info_size;
-                                     Call =:= transform ->
+handle_call(Call, From, State) when is_atom(Call), 
+                                    Call =:= info; Call =:= info_size;
+                                    Call =:= list; Call =:= transform ->
     TableId = State#state.table_id,
     Waiting = State#state.waiting,
     case TableId of
@@ -144,9 +145,9 @@ handle_call(Call, From, State) when is_atom(Call), Call =:= list;
             {reply, handle_transform(TableId), State}
     end;
 
-handle_call({Call, Term}, From, State) when is_atom(Call), Call =:= insert; 
-                                              Call =:= lookup; 
-                                              Call =:= lookup_element ->
+handle_call({Call, Term}, From, State) when is_atom(Call), 
+                                            Call =:= insert; Call =:= lookup; 
+                                            Call =:= lookup_element ->
     TableId = State#state.table_id,
     Waiting = State#state.waiting,
     case TableId of
@@ -266,4 +267,5 @@ handle_lookup(TableId, Term) ->
 
 handle_lookup_element(TableId, Term) ->
     ets:lookup_element(TableId, Term, 2).
+
 

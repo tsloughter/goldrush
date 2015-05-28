@@ -26,7 +26,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3, wait_for_pid/1]).
+-export([start_link/4, wait_for_pid/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -38,7 +38,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {table_id :: ets:tab(), managee :: atom()}).
+-record(state, {table_id :: ets:tab(), managee :: atom(), jobs_linearized :: atom()}).
 
 %%%===================================================================
 %%% API
@@ -57,8 +57,8 @@ setup(Name, Data) ->
 %%                                          {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Name, Managee, Data) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Managee, Data], []).
+start_link(Name, Managee, Data, JL) ->
+    gen_server:start_link({local, Name}, ?MODULE, [Managee, Data, JL], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -75,10 +75,10 @@ start_link(Name, Managee, Data) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([Managee, Data]) ->
+init([Managee, Data, JobsLinearized]) ->
     process_flag(trap_exit, true),
     setup(self(), Data),
-    {ok, #state{managee=Managee}}.
+    {ok, #state{managee=Managee, jobs_linearized=JobsLinearized}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -108,10 +108,17 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({setup, Data}, State = #state{managee=Managee}) ->
+handle_cast({setup, Data}, State = #state{managee=Managee,
+                                         jobs_linearized=JobsLinearized}) ->
     ManageePid = whereis(Managee),
     link(ManageePid),
-    TableId = ets:new(?MODULE, [set, private]),
+    Set = case lists:reverse(atom_to_list(Managee)) of
+              "srekrow_" ++ _ when JobsLinearized -> ordered_set;
+              _ -> set
+          end,
+    TableId = ets:new(Managee, [named_table, protected, Set,
+                                {read_concurrency, true},
+                                {write_concurrency, true}]),
     ets:insert(TableId, Data),
     ets:setopts(TableId, {heir, self(), Data}),
     ets:give_away(TableId, ManageePid, Data),
@@ -140,6 +147,8 @@ handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State = #state{managee=Manage
 %% @doc Wait for a registered process to be associated to a process identifier.
 %% @spec wait_for_pid(Managee) -> ManageePid
 -spec wait_for_pid(atom()) -> pid().
+wait_for_pid(Managee) when is_pid(Managee) -> 
+    Managee;
 wait_for_pid(Managee) when is_atom(Managee), Managee =/= undefined -> 
     case whereis(Managee) of
         undefined -> 

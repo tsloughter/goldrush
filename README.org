@@ -117,14 +117,11 @@ The previous example will produce and is equivalent to:
 
 
 
-* Composing Modules 
-  - All query modules must be compiled before use
+# Composing Modules #
 
 To compose a module you will take your Query defined above and compile it. 
 #+BEGIN_EXAMPLE
     glc:compile(Module, Query).
-    glc:compile(Module, Query, State).
-    glc:compile(Module, Query, State, ResetStatistics).
 #+END_EXAMPLE
 
 
@@ -157,16 +154,13 @@ Write all input events where `error_level' exists and is less than 5 as info rep
 
 
 
-* Composing Modules with stored data
-  - You can create query modules with local state to compare to event data in `with' and `run'
+# Composing Modules with stored state #
 
 To compose a module with state data you will add a third argument (orddict).
 #+BEGIN_EXAMPLE
     glc:compile(Module, Query, [{stored, value}]).
 #+END_EXAMPLE
 
-* Accessing stored data in constant time 
- - You can use query modules in a way similar to mochiglobal 
 
 Return the stored value in this query module.
 #+BEGIN_EXAMPLE
@@ -174,19 +168,57 @@ Return the stored value in this query module.
 #+END_EXAMPLE
 
 
-* Job processing with composed modules 
-  - You can use query modules to execute jobs, if the job doesn't error, process an event.
-  - `with' is similar to `run', the main difference is additional statistics and execution order
+# Executing jobs directly #
 
 To execute a job through the query module, inputting an event on success.
 #+BEGIN_EXAMPLE
     Event = gre:make([{'a', 2}], [list]).
     Result = glc:run(Module, fun(Event, State) ->
-        %% do not end with {error, _} or throw an exception 
+        %% do not end with error | {error, _} or throw an exception 
     end, Event).
 #+END_EXAMPLE
 
-* Event Processing Statistics 
+
+# Executing jobs in queue 
+
+%% Note: Jobs are linearized by default
+glc:compile(Module, Query, [{jobs_linearized, true}]). 
+
+To execute a queued job through the query module, inputting an event on success.
+#+BEGIN_EXAMPLE
+    Event = gre:make([{'a', 2}], [list]).
+    %% Id must be in <<"binary">> format or 'undefined' if auto-generated.
+    Result = glc:insert_queue(Module, Id, fun(Event, State) -> %% 
+        %% do not end with error | {error, _} or throw an exception 
+    end, Event).
+#+END_EXAMPLE
+
+# Options for job execution
+- width, defaults to number of schedulers if not provided
+- limit, defaults to 10k, hard limit before jobs are rejected
+- queue_limit, defaults to 250k, hard limit before queuing rejections
+- batch_limit, defaults to 10k, the max amount of jobs to process at a time
+- batch_delay, defaults to 1 [* 10], the time to wait for jobs to spool up
+- stats_enabled, defaults to true, provides statistics for events, jobs and queues
+- jobs_linearized, defaults to true, tries to execute the jobs serially.
+
+* Lolspeed can be achieved by setting either of the last two options to false.
+
+
+# Accessing stored state data #
+
+Return the stored value in this query module.
+#+BEGIN_EXAMPLE
+{ok, value} = glc:get(stored).
+#+END_EXAMPLE
+
+Return all stored values in this query module.
+#+BEGIN_EXAMPLE
+[...] = Module:get().
+#+END_EXAMPLE
+
+
+# Event Processing Statistics #
 
 Return the number of input events for this query module.
 #+BEGIN_EXAMPLE
@@ -204,44 +236,6 @@ glc:filter(Module).
 #+END_EXAMPLE
 
 
-* Job Processing Statistics 
-
-Return the number of job runs for this query module.
-#+BEGIN_EXAMPLE
-glc:job_run(Module).
-#+END_EXAMPLE
-
-Return the number of job errors for this query module.
-#+BEGIN_EXAMPLE
-glc:job_error(Module).
-#+END_EXAMPLE
-
-Return the number of job inputs for this query module.
-#+BEGIN_EXAMPLE
-glc:job_input(Module).
-#+END_EXAMPLE
-
-Return the amount of time jobs took for this query module.
-#+BEGIN_EXAMPLE
-glc:job_time(Module).
-#+END_EXAMPLE
-
-
-* Some Tips & Tricks 
-  - This is really just a drop in the bucket.
-
-Return the average time jobs took for this query module.
-#+BEGIN_EXAMPLE
-glc:job_time(Module) / glc:job_input(Module) / 1000000.
-#+END_EXAMPLE
-
-
-Return the query combining the conditional logic of multiple modules 
-#+BEGIN_EXAMPLE
-glc_lib:reduce(glc:all([Module1:info('query'), Module2:info('query')]).
-#+END_EXAMPLE
-
-
 * Build
 
 #+BEGIN_EXAMPLE
@@ -256,9 +250,13 @@ or
 
 * CHANGELOG 
 
+0.2.0
+- Support sidejob style execution with enhanced timing and batching.
+- Add more statistics and provide stats & job linearization toggles 
+
 0.1.7
-- Add job execution and timings
-- Add state storage option 
+- Support multiple functions specified using `with/2` 
+- Add state storage option with generated accessors
 
 0.1.6 
 - Add notfound event matching
