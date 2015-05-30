@@ -120,6 +120,8 @@ flatten({any, [_|_]=Conds}) ->
     flatten_any([flatten(Cond) || Cond <- Conds]);
 flatten({with, Cond, Action}) ->
     {with, flatten(Cond), Action};
+flatten([{with, _Cond, _Action}|_] = I) ->
+    [{with, flatten(Cond), Action} || {with, Cond, Action} <- I];
 flatten(Other) ->
     valid(Other).
 
@@ -247,7 +249,11 @@ deleteall(Filter, []) ->
 -spec is_valid(glc_ops:op()) -> boolean().
 is_valid({Field, '<', _Term}) when is_atom(Field) ->
     true;
+is_valid({Field, '=<', _Term}) when is_atom(Field) ->
+    true;
 is_valid({Field, '=', _Term}) when is_atom(Field) ->
+    true;
+is_valid({Field, '>=', _Term}) when is_atom(Field) ->
     true;
 is_valid({Field, '>', _Term}) when is_atom(Field) ->
     true;

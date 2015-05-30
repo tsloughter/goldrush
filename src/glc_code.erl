@@ -3,16 +3,16 @@
 -compile({nowarn_unused_function, {abstract_module,2}}).
 -compile({nowarn_unused_function, {abstract_tables,1}}).
 -compile({nowarn_unused_function, {abstract_reset,0}}).
--compile({nowarn_unused_function, {abstract_filter,2}}).
+-compile({nowarn_unused_function, {abstract_filter,3}}).
 -compile({nowarn_unused_function, {abstract_filter_,4}}).
 -compile({nowarn_unused_function, {abstract_opfilter,6}}).
 -compile({nowarn_unused_function, {abstract_all,4}}).
 -compile({nowarn_unused_function, {abstract_any,4}}).
--compile({nowarn_unused_function, {abstract_with,2}}).
+-compile({nowarn_unused_function, {abstract_with,3}}).
+-compile({nowarn_unused_function, {abstract_within,3}}).
 -compile({nowarn_unused_function, {abstract_getkey,4}}).
 -compile({nowarn_unused_function, {abstract_getkey_,4}}).
 -compile({nowarn_unused_function, {abstract_getparam,3}}).
--compile({nowarn_unused_function, {abstract_getparam_,3}}).
 -compile({nowarn_unused_function, {param_variable,1}}).
 -compile({nowarn_unused_function, {field_variable,1}}).
 -compile({nowarn_unused_function, {field_variable_,1}}).
@@ -29,7 +29,8 @@
 -record(module, {
     'query' :: term(),
     tables :: [{atom(), atom()}],
-    qtree :: term()
+    qtree :: term(),
+    store :: term()
 }).
 
 -type syntaxTree() :: erl_syntax:syntaxTree().
@@ -51,7 +52,7 @@ compile(Module, ModuleData) ->
     {ok, loaded, Module} = load_binary(Module, Binary),
     {ok, Module}.
 
-%% abstract code geneation functions
+%% abstract code generation functions
 
 %% @private Generate an abstract dispatch module.
 -spec abstract_module(atom(), #module{}) -> {ok, forms, list()}.
@@ -75,6 +76,10 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
      ?erl:attribute(
        ?erl:atom(export),
        [?erl:list([
+        %% get/1
+        ?erl:arity_qualifier(
+            ?erl:atom(get),
+            ?erl:integer(1)),
         %% info/1
         ?erl:arity_qualifier(
             ?erl:atom(info),
@@ -92,6 +97,13 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
             ?erl:atom(handle),
             ?erl:integer(1))])]),
      %% ]).
+     %% get(Name) -> Term.
+     ?erl:function(
+        ?erl:atom(get),
+        abstract_get(Data) ++
+        [?erl:clause(
+            [?erl:underscore()], none,
+                [?erl:abstract({error, undefined})])]),
      %% info(Name) -> Term.
      ?erl:function(
         ?erl:atom(info),
@@ -124,7 +136,7 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
      ?erl:function(
         ?erl:atom(handle_),
         [?erl:clause([?erl:variable("Event")], none,
-         abstract_filter(Tree, #state{
+         abstract_filter(Tree, Data, #state{
             event=?erl:variable("Event"),
             paramstab=ParamsTable,
             countstab=CountsTable}))])
@@ -140,6 +152,37 @@ abstract_tables(Tables) ->
         [?erl:abstract(V)])
     || {K, V} <- Tables].
 
+abstract_query_find(K, Store) ->
+    case lists:keyfind(K, 1, Store) of
+        {_, Val} -> 
+            {ok, Val};
+        _ ->  
+            {error, notfound}
+    end.
+
+%% @private Return the original query as an expression.
+abstract_query({with, Query, _}) ->
+    [?erl:abstract(Query)];
+abstract_query([{with, _Query, _}|_] = I) ->
+    [?erl:abstract([Query || {with, Query, _} <- I])];
+    %[?erl:abstract(_Query)];
+abstract_query({any, [{with, _Q, _A}|_] = I}) ->
+    Queries = glc_lib:reduce(glc:any([Q || {with, Q, _} <- I])),
+    [?erl:abstract(Queries)];
+abstract_query({all, [{with, _Q, _A}|_] = I}) ->
+    Queries = glc_lib:reduce(glc:all([Q || {with, Q, _} <- I])),
+    [?erl:abstract(Queries)];
+abstract_query(Query) ->
+    [?erl:abstract(Query)].
+
+
+%% @private Return the clauses of the get/1 function.
+abstract_get(#module{'query'=_Query, store=undefined}) ->
+    [];
+abstract_get(#module{'query'=_Query, store=Store}) ->
+    [?erl:clause([?erl:abstract(K)], none, 
+                 abstract_query(abstract_query_find(K, Store)))
+        || {K, _} <- Store].
 %% @private Return the clauses of the info/1 function.
 abstract_info(#module{'query'=Query}) ->
     [?erl:clause([?erl:abstract(K)], none, V)
@@ -161,22 +204,30 @@ abstract_reset() ->
     ]].
 
 
-%% @private Return the original query as an expression.
-abstract_query({with, _, _}) ->
-    [?erl:abstract([])];
-abstract_query(Query) ->
-    [?erl:abstract(Query)].
-
-
 %% @private Return a list of expressions to apply a filter.
 %% @todo Allow mulitple functions to be specified using `with/2'.
--spec abstract_filter(glc_ops:op(), #state{}) -> [syntaxTree()].
-abstract_filter({with, Cond, Fun}, State) ->
+-spec abstract_filter(glc_ops:op() | [glc_ops:op()], #module{}, #state{}) -> [syntaxTree()].
+abstract_filter({Type, [{with, _Cond, _Fun}|_] = I}, Data, State) when Type =:= all; Type =:= any ->
+    Cond = glc_lib:reduce(glc:Type([Q || {with, Q, _} <- I])),
     abstract_filter_(Cond,
         _OnMatch=fun(State2) ->
-            [abstract_count(output)] ++ abstract_with(Fun, State2) end,
+            Funs = [ F || {with, _, F} <- I ],
+            [abstract_count(output)] ++ 
+                abstract_with(Funs, Data, State2) end,
         _OnNomatch=fun(_State2) -> [abstract_count(filter)] end, State);
-abstract_filter(Cond, State) ->
+abstract_filter([{with, _Cond, _Fun}|_] = I, Data, State) ->
+    OnNomatch = fun(_State2) -> [abstract_count(filter, 0)] end,
+    Funs = lists:foldl(fun({with, Cond, Fun}, Acc) -> 
+              [{Cond, Fun, Data}|Acc]
+      end, [], I),
+    abstract_within(Funs, OnNomatch, State);
+abstract_filter({with, Cond, Fun}, Data, State) ->
+    abstract_filter_(Cond,
+        _OnMatch=fun(State2) ->
+            [abstract_count(output)] ++ 
+                abstract_with(Fun, Data, State2) end,
+        _OnNomatch=fun(_State2) -> [abstract_count(filter)] end, State);
+abstract_filter(Cond, _Data, State) ->
     abstract_filter_(Cond,
         _OnMatch=fun(_State2) -> [abstract_count(output)] end,
         _OnNomatch=fun(_State2) -> [abstract_count(filter)] end, State).
@@ -202,8 +253,13 @@ abstract_filter_({Key, '!'}, OnMatch, OnNomatch, State) ->
         _OnMatch=fun(#state{}=State2) -> OnMatch(State2) end,
                     State);
 abstract_filter_({Key, Op, Value}, OnMatch, OnNomatch, State)
-        when Op =:= '>'; Op =:= '='; Op =:= '<' ->
-    Op2 = case Op of '=' -> '=:='; Op -> Op end,
+        when Op =:= '>'; Op =:= '='; Op =:= '<';
+             Op =:= '>='; Op =:= '=<'; Op =:= '<=' ->
+    Op2 = case Op of 
+              '=' -> '=:=';  
+              '<=' -> '=<';
+              Op -> Op 
+          end,
     abstract_opfilter(Key, Op2, Value, OnMatch, OnNomatch, State);
 abstract_filter_({'any', Conds}, OnMatch, OnNomatch, State) ->
     abstract_any(Conds, OnMatch, OnNomatch, State);
@@ -252,12 +308,43 @@ abstract_any([], _OnMatch, OnNomatch, State) ->
     OnNomatch(State).
 
 %% @private
--spec abstract_with(fun((gre:event()) -> term()), #state{}) -> [syntaxTree()].
-abstract_with(Fun, State) when is_function(Fun, 1) ->
+-spec abstract_with(fun((gre:event()) -> term()), 
+                    #module{}, #state{}) -> [syntaxTree()].
+abstract_with([Fun0|_] = Funs, Data, State) 
+  when is_function(Fun0, 1); is_function(Fun0, 2)  ->
+    abstract_getparam(Funs, fun(#state{event=Event, paramvars=Params}) ->
+           lists:map(fun(Fun) -> 
+                {_, Fun2} = lists:keyfind(Fun, 1, Params),
+                abstract_with_({Fun, Fun2}, Event, Data)
+           end, Funs)
+        end, State);
+abstract_with(Fun, Data, State) when is_function(Fun, 1); is_function(Fun, 2)  ->
     abstract_getparam(Fun, fun(#state{event=Event, paramvars=Params}) ->
             {_, Fun2} = lists:keyfind(Fun, 1, Params),
-            [?erl:application(none, Fun2, [Event])]
+            [abstract_with_({Fun, Fun2}, Event, Data)]
         end, State).
+
+abstract_within([{H, Fun, Data}|T], OnNomatch, State) ->
+    OnMatch = fun(State2) -> [abstract_count(output)] ++ 
+                              abstract_with(Fun, Data, State2) 
+                           ++ abstract_within(T, OnNomatch, State2)
+              end,
+    abstract_filter_(H, OnMatch,
+        _OnNomatch=fun(State2) -> 
+                           [abstract_count(filter)] ++ 
+                            abstract_within(T, OnNomatch, State2)
+        end, State);
+abstract_within([], OnNomatch, State) ->
+    OnNomatch(State).
+
+abstract_with_({Fun, Fun2}, Event, #module{store=Store}) ->
+    ?erl:application(none, Fun2, 
+                     case Fun of
+                         _ when is_function(Fun, 1) ->
+                             [Event];
+                         _ when is_function(Fun, 2) ->
+                             [Event, ?erl:abstract(Store)]
+                     end).
 
 %% @private Bind the value of a field to a variable.
 %% If the value of a field has already been bound to a variable the previous
@@ -296,31 +383,44 @@ abstract_getkey_(Key, OnMatch, OnNomatch, #state{
 %% During code generation the parameter value is used as the identity of the
 %% parameter. At runtime a unique integer is used as the identity.
 -spec abstract_getparam(term(), nextFun(), #state{}) -> [syntaxTree()].
+abstract_getparam([_|_]=Terms, OnBound, #state{paramvars=_Params, fields=_Fields,
+                                         paramstab=_ParamsTable}=State) 
+                                    when is_list(Terms) ->
+
+    {Keys, Bound} = lists:foldl(fun(Term, {Acc0, #state{paramvars=Params,
+                                         paramstab=ParamsTable}=State0}) ->
+        case lists:keyfind(Term, 1, Params) of
+            {_, _Variable} -> 
+                {Acc0, State0};
+
+            false ->
+                Key = abstract_getparam_key(Term, ParamsTable),
+                Lookup = abstract_apply(gr_param, lookup_element,
+                             [abstract_apply(table, [?erl:atom(params)]),
+                              ?erl:abstract(Key)]),
+                Expr = ?erl:match_expr(param_variable(Key), Lookup),
+                State1 = State0#state{paramvars=[{Term, param_variable(Key)}|Params]},
+                {[Expr|Acc0], State1}
+
+        end
+    end, {[], State}, Terms),
+    Keys ++ OnBound(Bound);
 abstract_getparam(Term, OnBound, #state{paramvars=Params}=State) ->
     case lists:keyfind(Term, 1, Params) of
         {_, _Variable} -> OnBound(State);
         %% parameter not bound to variable in this scope.
-        false -> abstract_getparam_(Term, OnBound, State)
+        false -> abstract_getparam([Term], OnBound, State)
     end.
 
-
--spec abstract_getparam_(term(), nextFun(), #state{}) -> [syntaxTree()].
-abstract_getparam_(Term, OnBound, #state{paramstab=ParamsTable,
-        paramvars=Params}=State) ->
-    Key = case gr_param:lookup(ParamsTable, Term) of
+abstract_getparam_key(Term, ParamsTable) ->
+    case gr_param:lookup(ParamsTable, Term) of
         [{_, Key2}] ->
             Key2;
         [] ->
             Key2 = gr_param:info_size(ParamsTable),
             gr_param:insert(ParamsTable, {Term, Key2}),
             Key2
-    end,
-    [?erl:match_expr(
-        param_variable(Key),
-        abstract_apply(gr_param, lookup_element,
-            [abstract_apply(table, [?erl:atom(params)]),
-             ?erl:abstract(Key)]))
-    ] ++ OnBound(State#state{paramvars=[{Term, param_variable(Key)}|Params]}).
+    end.
 
 %% @private Generate a variable name for the value of a field.
 -spec field_variable(atom()) -> string().
@@ -362,19 +462,28 @@ param_variable(Key) ->
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_count(atom()) -> syntaxTree().
 abstract_count(Counter) ->
+    abstract_count(Counter, 1).
+abstract_count(Counter, Value) when is_integer(Value) ->
     abstract_apply(gr_counter, update_counter,
         [abstract_apply(table, [?erl:atom(counters)]),
          ?erl:abstract(Counter),
-         ?erl:abstract({2,1})]).
+         ?erl:abstract({2,Value})]);
+abstract_count(Counter, Value) ->
+    abstract_apply(gr_counter, update_counter,
+        [abstract_apply(table, [?erl:atom(counters)]),
+         ?erl:abstract(Counter),
+         ?erl:tuple([?erl:abstract(2), Value])
+        ]).
 
 
 %% @private Return an expression to get the value of a counter.
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_getcount(atom()) -> [syntaxTree()].
+abstract_getcount(Counter) when is_atom(Counter) ->
+    abstract_getcount(?erl:abstract(Counter));
 abstract_getcount(Counter) ->
     [abstract_apply(gr_counter, lookup_element,
-        [abstract_apply(table, [?erl:atom(counters)]),
-         ?erl:abstract(Counter)])].
+        [abstract_apply(table, [?erl:atom(counters)]), Counter])].
 
 %% @private Return an expression to reset a counter.
 -spec abstract_resetcount(atom() | [filter | input | output]) -> [syntaxTree()].
