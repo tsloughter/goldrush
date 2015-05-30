@@ -4,7 +4,7 @@ Goldrush is a small Erlang app that provides fast event stream processing
 
 # Features #
 * Event processing compiled to a query module
- - per module protected event processing statistics
+ - per module private event processing statistics
  - query module logic can be combined for any/all filters
  - query module logic can be reduced to efficiently match event processing
 
@@ -19,8 +19,11 @@ Goldrush is a small Erlang app that provides fast event stream processing
 
 * Handle output events
  - Once a query has been composed the output action can be overriden
-   with an erlang function. The function will be applied to each
+   with one or more erlang functions. The functions will be applied to each
    output event from the query.
+
+* Handle low latency retrieval of compile-time stored values.
+- Values stored are also provided to functions called on event output.
 
 * Usage 
   To use goldrush in your application, you need to define it as a rebar dep or
@@ -38,6 +41,11 @@ Select all events where 'a' exists and is greater than 0.
     glc:gt(a, 0).
 #+END_EXAMPLE
 
+Select all events where 'a' exists and is greater than or equal to 0.
+#+BEGIN_EXAMPLE
+    glc:gte(a, 0).
+#+END_EXAMPLE
+
 Select all events where 'a' exists and is equal to 0.
 #+BEGIN_EXAMPLE
     glc:eq(a, 0).
@@ -46,6 +54,11 @@ Select all events where 'a' exists and is equal to 0.
 Select all events where 'a' exists and is less than 0.
 #+BEGIN_EXAMPLE
     glc:lt(a, 0).
+#+END_EXAMPLE
+
+Select all events where 'a' exists and is less than or equal to 0.
+#+BEGIN_EXAMPLE
+    glc:lte(a, 0).
 #+END_EXAMPLE
 
 Select all events where 'a' exists.
@@ -146,6 +159,35 @@ Write all input events where `error_level' exists and is less than 5 as info rep
          error_logger:info_report(gre:pairs(E)) end).
 #+END_EXAMPLE
 
+Write all input events where `error_level' exists and is 3 or 5 as info reports to the error logger.
+#+BEGIN_EXAMPLE
+   glc:any([
+     glc:with(glc:lt(error_level, 3), fun(E) ->
+         error_logger:info_report(gre:pairs(E)) end),
+     glc:with(glc:lt(error_level, 5), fun(E) ->
+         error_logger:info_report(gre:pairs(E)) end)]).
+
+#+END_EXAMPLE
+
+
+# Composing Modules with stored state #
+
+To compose a module with state data you will add a third argument (orddict).
+#+BEGIN_EXAMPLE
+    glc:compile(Module, Query, [{stored, value}]).
+#+END_EXAMPLE
+
+# Accessing stored state data #
+
+Return the stored value in this query module.
+#+BEGIN_EXAMPLE
+{ok, value} = glc:get(stored).
+#+END_EXAMPLE
+
+Return all stored values in this query module.
+#+BEGIN_EXAMPLE
+[...] = Module:get().
+#+END_EXAMPLE
 
 # Event Processing Statistics #
 
@@ -178,6 +220,11 @@ or
 #+END_EXAMPLE
 
 * CHANGELOG 
+
+0.1.7
+- Support multiple functions specified using `with/2` 
+- Add support for greater than or less than operators
+- Add state storage option for output events or lookup
 
 0.1.6 
 - Add notfound event matching

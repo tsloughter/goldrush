@@ -19,6 +19,7 @@
 %% API
 -export([start_link/1, 
          list/1, lookup_element/2,
+         insert_counter/3,
          update_counter/3, reset_counters/2]).
 
 %% gen_server callbacks
@@ -45,6 +46,26 @@ lookup_element(Server, Term) ->
     case (catch gen_server:call(Server, {lookup_element, Term})) of
         {'EXIT', _Reason} ->
             lookup_element(gr_manager:wait_for_pid(Server), Term);
+        Else -> Else
+    end.
+
+insert_counter(Server, Counter, Value) when is_atom(Server) ->
+    case whereis(Server) of
+        undefined -> 
+            insert_counter(gr_manager:wait_for_pid(Server), Counter, Value);
+        Pid -> 
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    insert_counter(Pid, Counter, Value);
+                false ->
+                    ServerPid = gr_manager:wait_for_pid(Server),
+                    insert_counter(ServerPid, Counter, Value)
+            end
+    end;
+insert_counter(Server, Counter, Value) when is_pid(Server) ->
+    case (catch gen_server:call(Server, {insert_counter, Counter, Value})) of
+        {'EXIT', _Reason} ->
+            insert_counter(gr_manager:wait_for_pid(Server), Counter, Value);
         Else -> Else
     end.
 
@@ -118,7 +139,7 @@ handle_call(list=Call, From, State) ->
     Waiting = State#state.waiting,
     case TableId of
         undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
-        _ -> {reply, handle_list(TableId), State}
+        _ -> {reply, lists:sort(handle_list(TableId)), State}
     end;
 handle_call({lookup_element, Term}=Call, From, State) ->
     TableId = State#state.table_id,
@@ -126,6 +147,15 @@ handle_call({lookup_element, Term}=Call, From, State) ->
     case TableId of
         undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
         _ -> {reply, handle_lookup_element(TableId, Term), State}
+    end;
+handle_call({insert_counter, Counter, Value}, From, State) ->
+    Term = [{Counter, Value}],
+    Call = {insert, Term},
+    TableId = State#state.table_id,
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
+        _ -> {reply, handle_insert(TableId, Term), State}
     end;
 handle_call({reset_counters, Counter}, From, State) ->
     Term = case Counter of

@@ -140,6 +140,8 @@ handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State = #state{managee=Manage
 %% @doc Wait for a registered process to be associated to a process identifier.
 %% @spec wait_for_pid(Managee) -> ManageePid
 -spec wait_for_pid(atom()) -> pid().
+wait_for_pid(Managee) when is_pid(Managee) -> 
+    Managee;
 wait_for_pid(Managee) when is_atom(Managee), Managee =/= undefined -> 
     case whereis(Managee) of
         undefined -> 

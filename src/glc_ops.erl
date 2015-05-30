@@ -2,9 +2,9 @@
 -module(glc_ops).
 
 -export([
-    lt/2,
+    lt/2, lte/2,
     eq/2,
-    gt/2,
+    gt/2, gte/2,
     wc/1,
     nf/1
 ]).
@@ -21,9 +21,10 @@
 ]).
 
 -type op() ::
-    {atom(), '<', term()} |
+    {atom(), '=<', term()} |
     {atom(), '=', term()} |
     {atom(), '>', term()} |
+    {atom(), '>=', term()} |
     {atom(), '*'} |
     {atom(), '!'} |
     {any, [op(), ...]} |
@@ -39,6 +40,14 @@ lt(Key, Term) when is_atom(Key) ->
 lt(Key, Term) ->
     erlang:error(badarg, [Key, Term]).
 
+
+%% @doc Test that a field value is less than or equal to a term.
+-spec lte(atom(), term()) -> op().
+lte(Key, Term) when is_atom(Key) ->
+    {Key, '=<', Term};
+lte(Key, Term) ->
+    erlang:error(badarg, [Key, Term]).
+
 %% @doc Test that a field value is equal to a term.
 -spec eq(atom(), term()) -> op().
 eq(Key, Term) when is_atom(Key) ->
@@ -51,6 +60,13 @@ eq(Key, Term) ->
 gt(Key, Term) when is_atom(Key) ->
     {Key, '>', Term};
 gt(Key, Term) ->
+    erlang:error(badarg, [Key, Term]).
+
+%% @doc Test that a field value is greater than or equal to a term.
+-spec gte(atom(), term()) -> op().
+gte(Key, Term) when is_atom(Key) ->
+    {Key, '>=', Term};
+gte(Key, Term) ->
     erlang:error(badarg, [Key, Term]).
 
 %% @doc Test that a field exists.
@@ -105,7 +121,8 @@ null(Result) ->
 %% to use a finalized query to construct a new query will result
 %% in a `badarg' error.
 -spec with(op(), fun((gre:event()) -> term())) -> op().
-with(Query, Fun) when is_function(Fun, 1) ->
+with(Query, Fun) when is_function(Fun, 1);
+                      is_function(Fun, 2) ->
     {with, Query, Fun};
 with(Query, Fun) ->
     erlang:error(badarg, [Query, Fun]).

@@ -19,6 +19,8 @@
     make/2,
     has/2,
     fetch/2,
+    append/2,
+    merge/2,
     find/2,
     keys/1,
     pairs/1
@@ -38,6 +40,13 @@ make(Term, [Type]) ->
 has(Key, {list, List}) ->
     lists:keymember(Key, 1, List).
 
+-spec append(term(), event()) -> event().
+append(KeyVal, {list, List}) ->
+    {list, [KeyVal|List]}.
+
+-spec merge(event(), event()) -> event().
+merge({list, AList}, {list, BList}) ->
+    {list, lists:merge(AList, BList)}.
 
 %% @doc Get the value of a field in an event.
 %% The field is expected to exist in the event.

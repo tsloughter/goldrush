@@ -64,16 +64,18 @@
 -export([
     compile/2,
     compile/3,
+    compile/4,
     handle/2,
+    get/2,
     delete/1,
     reset_counters/1,
     reset_counters/2
 ]).
 
 -export([
-    lt/2,
+    lt/2, lte/2,
     eq/2,
-    gt/2,
+    gt/2, gte/2,
     wc/1,
     nf/1
 ]).
@@ -95,12 +97,17 @@
 -record(module, {
     'query' :: term(),
     tables :: [{atom(), atom()}],
-    qtree :: term()
+    qtree :: term(),
+    store :: term()
 }).
 
 -spec lt(atom(), term()) -> glc_ops:op().
 lt(Key, Term) ->
     glc_ops:lt(Key, Term).
+
+-spec lte(atom(), term()) -> glc_ops:op().
+lte(Key, Term) ->
+    glc_ops:lte(Key, Term).
 
 -spec eq(atom(), term()) -> glc_ops:op().
 eq(Key, Term) ->
@@ -109,6 +116,10 @@ eq(Key, Term) ->
 -spec gt(atom(), term()) -> glc_ops:op().
 gt(Key, Term) ->
     glc_ops:gt(Key, Term).
+
+-spec gte(atom(), term()) -> glc_ops:op().
+gte(Key, Term) ->
+    glc_ops:gte(Key, Term).
 
 -spec wc(atom()) -> glc_ops:op().
 wc(Key) ->
@@ -179,11 +190,18 @@ union(Queries) ->
 %% The counters are reset by default, unless Reset is set to false 
 -spec compile(atom(), glc_ops:op() | [glc_ops:op()]) -> {ok, atom()}.
 compile(Module, Query) ->
-    compile(Module, Query, true).
+    compile(Module, Query, undefined, true).
 
 -spec compile(atom(), glc_ops:op() | [glc_ops:op()], boolean()) -> {ok, atom()}.
-compile(Module, Query, Reset) ->
-    {ok, ModuleData} = module_data(Module, Query),
+compile(Module, Query, Reset) when is_boolean(Reset) ->
+    compile(Module, Query, undefined, Reset);
+compile(Module, Query, undefined) ->
+    compile(Module, Query, undefined, true);
+compile(Module, Query, Store) when is_list(Store) ->
+    compile(Module, Query, Store, true).
+
+compile(Module, Query, Store, Reset) ->
+    {ok, ModuleData} = module_data(Module, Query, Store),
     case glc_code:compile(Module, ModuleData) of
         {ok, Module} when Reset ->
             reset_counters(Module),
@@ -196,10 +214,14 @@ compile(Module, Query, Reset) ->
 %% @doc Handle an event using a compiled query.
 %%
 %% The input event is expected to have been returned from {@link gre:make/2}.
--spec handle(atom(), gre:event()) -> ok.
+-spec handle(atom(), list({atom(), term()}) | gre:event()) -> ok.
+handle(Module, Event) when is_list(Event) ->
+    Module:handle(gre:make(Event, [list]));
 handle(Module, Event) ->
     Module:handle(Event).
 
+get(Module, Key) ->
+    Module:get(Key).
 %% @doc The number of input events for this query module.
 -spec input(atom()) -> non_neg_integer().
 input(Module) ->
@@ -255,8 +277,8 @@ reset_counters(Module, Counter) ->
     Module:reset_counters(Counter).
 
 %% @private Map a query to a module data term.
--spec module_data(atom(), term()) -> {ok, #module{}}.
-module_data(Module, Query) ->
+-spec module_data(atom(), term(), term()) -> {ok, #module{}}.
+module_data(Module, Query, Store) ->
     %% terms in the query which are not valid arguments to the
     %% erl_syntax:abstract/1 functions are stored in ETS.
     %% the terms are only looked up once they are necessary to
@@ -269,7 +291,7 @@ module_data(Module, Query) ->
     %% function maps names to registered processes response for those tables.
     Tables = module_tables(Module),
     Query2 = glc_lib:reduce(Query),
-    {ok, #module{'query'=Query, tables=Tables, qtree=Query2}}.
+    {ok, #module{'query'=Query, tables=Tables, qtree=Query2, store=Store}}.
 
 %% @private Create a data managed supervised process for params, counter tables
 module_tables(Module) ->
@@ -332,8 +354,11 @@ manage_counts_name(Module) -> reg_name(Module, "_counters_mgr").
 -include_lib("eunit/include/eunit.hrl").
 
 setup_query(Module, Query) ->
+    setup_query(Module, Query, undefined).
+
+setup_query(Module, Query, Store) ->
     ?assertNot(erlang:module_loaded(Module)),
-    ?assertEqual({ok, Module}, case (catch compile(Module, Query)) of
+    ?assertEqual({ok, Module}, case (catch compile(Module, Query, Store)) of
         {'EXIT',_}=Error -> ?debugFmt("~p", [Error]), Error; Else -> Else end),
     ?assert(erlang:function_exported(Module, table, 1)),
     ?assert(erlang:function_exported(Module, handle, 1)),
@@ -444,7 +469,7 @@ events_test_() ->
             },
             {"opfilter greater than test",
                 fun() ->
-                    {compiled, Mod} = setup_query(testmod10, glc:gt(a, 1)),
+                    {compiled, Mod} = setup_query(testmod10a, glc:gt(a, 1)),
                     glc:handle(Mod, gre:make([{'a', 2}], [list])),
                     ?assertEqual(1, Mod:info(input)),
                     ?assertEqual(0, Mod:info(filter)),
@@ -454,9 +479,24 @@ events_test_() ->
                     ?assertEqual(1, Mod:info(output))
                 end
             },
+            {"opfilter greater than or equal to test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod10b, glc:gte(a, 1)),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 0}], [list])),
+                    ?assertEqual(3, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output))
+                end
+            },
             {"opfilter less than test",
                 fun() ->
-                    {compiled, Mod} = setup_query(testmod11, glc:lt(a, 1)),
+                    {compiled, Mod} = setup_query(testmod11a, glc:lt(a, 1)),
                     glc:handle(Mod, gre:make([{'a', 0}], [list])),
                     ?assertEqual(1, Mod:info(input)),
                     ?assertEqual(0, Mod:info(filter)),
@@ -465,6 +505,23 @@ events_test_() ->
                     ?assertEqual(2, Mod:info(input)),
                     ?assertEqual(1, Mod:info(filter)),
                     ?assertEqual(1, Mod:info(output))
+                end
+            },
+            {"opfilter less than or equal to test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod11b, glc:lte(a, 1)),
+                    glc:handle(Mod, gre:make([{'a', 0}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output)),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output)),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    ?assertEqual(3, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output))
                 end
             },
             {"allholds op test",
@@ -509,9 +566,22 @@ events_test_() ->
                     ?assertEqual(1, receive Msg -> Msg after 0 -> notcalled end)
                 end
             },
+            {"with function storage test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+                    {compiled, Mod} = setup_query(testmod15,
+                        glc:with(glc:eq(a, 1), fun(Event, EStore) -> 
+                           Self ! {gre:fetch(a, Event), EStore} end),
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(1, receive {Msg, Store} -> Msg after 0 -> notcalled end)
+                end
+            },
             {"delete test",
                 fun() ->
-                    {compiled, Mod} = setup_query(testmod15, glc:null(false)),
+                    {compiled, Mod} = setup_query(testmod16, glc:null(false)),
                     ?assert(is_atom(Mod:table(params))),
                     ?assertMatch([_|_], gr_param:info(Mod:table(params))),
                     ?assert(is_list(code:which(Mod))),
@@ -531,7 +601,7 @@ events_test_() ->
             },
             {"reset counters test",
                 fun() ->
-                    {compiled, Mod} = setup_query(testmod16,
+                    {compiled, Mod} = setup_query(testmod17,
                         glc:any([glc:eq(a, 1), glc:eq(b, 2)])),
                     glc:handle(Mod, gre:make([{'a', 2}], [list])),
                     glc:handle(Mod, gre:make([{'b', 1}], [list])),
@@ -560,7 +630,7 @@ events_test_() ->
             {"ets data recovery test",
                 fun() ->
                     Self = self(),
-                    {compiled, Mod} = setup_query(testmod17,
+                    {compiled, Mod} = setup_query(testmod18,
                         glc:with(glc:eq(a, 1), fun(Event) -> Self ! gre:fetch(a, Event) end)),
                     glc:handle(Mod, gre:make([{a,1}], [list])),
                     ?assertEqual(1, Mod:info(output)),
@@ -575,6 +645,142 @@ events_test_() ->
                     ?assertEqual(2, Mod:info(output)),
                     ?assertEqual(1, length(gr_param:list(Mod:table(params)))),
                     ?assertEqual(3, length(gr_counter:list(Mod:table(counters))))
+                end
+            },
+            {"variable storage test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod19,
+                        glc:eq(a, 2), [{stream, time}]),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'b', 2}], [list])),
+                    ?assertEqual(3, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    ?assertEqual({ok, time}, glc:get(Mod, stream)),
+                    ?assertEqual({error, undefined}, glc:get(Mod, beam))
+                end
+            },
+            {"with multi function any test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+
+                    G1 = glc:with(glc:eq(a, 1), fun(_Event, EStore) -> 
+                       Self ! {a, EStore} end),
+                    G2 = glc:with(glc:eq(b, 2), fun(_Event, EStore) -> 
+                       Self ! {b, EStore} end),
+
+                    {compiled, Mod} = setup_query(testmod20, any([G1, G2]),
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(b, receive {Msg, _Store} -> Msg after 0 -> notcalled end)
+                end
+            },
+            {"with multi function all test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+
+                    G1 = glc:with(glc:eq(a, 1), fun(_Event, EStore) -> 
+                       Self ! {a, EStore} end),
+                    G2 = glc:with(glc:eq(b, 2), fun(_Event, EStore) -> 
+                       Self ! {b, EStore} end),
+                    G3 = glc:with(glc:eq(c, 3), fun(_Event, EStore) -> 
+                       Self ! {c, EStore} end),
+
+                    {compiled, Mod} = setup_query(testmod21, all([G1, G2, G3]),
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}], [list])),
+                    ?assertEqual(0, Mod:info(output)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{a,1}, {b, 2}], [list])),
+                    ?assertEqual(0, Mod:info(output)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{a,1}, {b, 2}, {c, 3}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(b, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(c, receive {Msg, _Store} -> Msg after 0 -> notcalled end)
+                end
+            },
+            {"with multi-function output match test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+
+                    {compiled, Mod} = setup_query(testmod22,
+                          [glc:with(glc:eq(a, 1), fun(Event, _EStore) -> 
+                              Self ! {a, gre:fetch(a, Event)} end),
+                           glc:with(glc:gt(b, 1), fun(Event, _EStore) -> 
+                              Self ! {b, gre:fetch(b, Event)} end)],
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}, {b, 1}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(a, receive {a=Msg, _Store} -> Msg after 0 -> notcalled end)
+
+                end
+            },
+            {"with multi-function output double-match test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+                    {compiled, Mod} = setup_query(testmod23,
+                          [glc:with(glc:eq(a, 1), fun(Event, _EStore) -> 
+                              Self ! {a, gre:fetch(a, Event)} end),
+                           glc:with(glc:eq(b, 1), fun(Event, _EStore) -> 
+                              Self ! {b, gre:fetch(b, Event)} end)],
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}, {b, 1}], [list])),
+                    ?assertEqual(2, Mod:info(output)),
+                    ?assertEqual(a, receive {a=Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(b, receive {b=Msg, _Store} -> Msg after 0 -> notcalled end)
+                end
+            },
+            {"with multi function complex match test",
+                fun() ->
+                    Self = self(),
+                    Store = [{stored, value}],
+
+                    G1 = glc:with(glc:gt(r, 0.1), fun(_Event, EStore) -> 
+                       Self ! {a, EStore} end),
+                    G2 = glc:with(glc:all([glc:eq(a, 1), glc:gt(r, 0.5)]), fun(_Event, EStore) -> 
+                       Self ! {b, EStore} end),
+                    G3 = glc:with(glc:all([glc:eq(a, 1), glc:eq(b, 2), glc:gt(r, 0.6)]), fun(_Event, EStore) -> 
+                       Self ! {c, EStore} end),
+
+                    {compiled, Mod} = setup_query(testmod24, [G1, G2, G3],
+                         Store),
+                    glc:handle(Mod, gre:make([{a,1}, {r, 0.7}, {b, 3}], [list])),
+                    ?assertEqual(2, Mod:info(output)),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(b, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    %
+                    glc:handle(Mod, gre:make([{a,1}, {r, 0.6}], [list])),
+                    ?assertEqual(4, Mod:info(output)),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    ?assertEqual(b, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    %
+                    glc:handle(Mod, gre:make([{a,2}, {r, 0.7}, {b, 3}], [list])),
+                    ?assertEqual(5, Mod:info(output)),
+                    ?assertEqual(3, Mod:info(input)),
+                    ?assertEqual(4, Mod:info(filter)),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+
+                    glc:handle(Mod, gre:make([{a,1}, {r, 0.7}, {b, 2}], [list])),
+                    ?assertEqual(8, Mod:info(output)),
+                    ?assertEqual(4, Mod:info(input)),
+                    ?assertEqual(4, Mod:info(filter)),
+                    ?assertEqual(c, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(b, receive {Msg, _Store} -> Msg after 0 -> notcalled end),
+                    ?assertEqual(a, receive {Msg, _Store} -> Msg after 0 -> notcalled end)
                 end
             }
         ]
