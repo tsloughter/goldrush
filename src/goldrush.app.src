@@ -4,5 +4,9 @@
     {registered, []},
     {applications, [kernel, stdlib, syntax_tools, compiler]},
     {mod, {gr_app, []}},
-    {env, []}
+    {env, []},
+
+    {maintainers, ["Pedram Nimreezi", "Loic Hoguin"]},
+    {licenses, ["ISC"]},
+    {links, [{"GitHub", "https://github.com/DeadZen/goldrush"}]}
 ]}.
